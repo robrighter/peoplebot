@@ -8,8 +8,45 @@ import sqlite3
 import uuid
 import pickle
 import time
+import openai
+
 
 KNOWN_FACES_DIR = "known_faces"
+# Set up API key and library
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+
+
+def chat_with_gpt(user_input, conversation_history):
+    conversation_history.append(f"User: {user_input}")
+
+    response = openai.Completion.create(
+        engine="text-davinci-002",
+        prompt='\n'.join(conversation_history) + "\nAI:",
+        max_tokens=100,
+        n=1,
+        stop=None,
+        temperature=0.5,
+    )
+
+    message = response.choices[0].text.strip()
+    conversation_history.append(f"AI: {message}")
+    return message
+
+
+def summarize_conversation(conversation_history):
+    summary_prompt = "Please summarize the following conversation:\n" + '\n'.join(conversation_history)
+    response = openai.Completion.create(
+        engine="text-davinci-002",
+        prompt=summary_prompt,
+        max_tokens=100,
+        n=1,
+        stop=None,
+        temperature=0.5,
+    )
+
+    summary = response.choices[0].text.strip()
+    return summary
 
 
 def speak_text(text):
