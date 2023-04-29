@@ -12,40 +12,51 @@ import openai
 
 
 KNOWN_FACES_DIR = "known_faces"
+NAME = "Radar"
 # Set up API key and library
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
-
 def chat_with_gpt(user_input, conversation_history):
-    conversation_history.append(f"User: {user_input}")
+    if not conversation_history:
+        conversation_history.append({
+            "role": "assistant",
+            "content": "You're name is  "+NAME+". It's time to make a new friend. You are speaking with a person you have never met. Your goal is to learn as much as possible about the person and be a good friend."
+        })
 
-    response = openai.Completion.create(
-        engine="text-davinci-002",
-        prompt='\n'.join(conversation_history) + "\nAI:",
-        max_tokens=100,
+    conversation_history.append({"role": "user", "content": user_input})
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=conversation_history,
+        max_tokens=150,
         n=1,
         stop=None,
         temperature=0.5,
     )
 
-    message = response.choices[0].text.strip()
-    conversation_history.append(f"AI: {message}")
+    message = response.choices[0].message["content"]
+    conversation_history.append({"role": "assistant", "content": message})
     return message
 
 
 def summarize_conversation(conversation_history):
-    summary_prompt = "Please summarize the following conversation:\n" + '\n'.join(conversation_history)
-    response = openai.Completion.create(
-        engine="text-davinci-002",
-        prompt=summary_prompt,
+    system_prompt = {
+        "role": "system",
+        "content": "Your task is to summarize the conversation, capturing important parts to be reused as context the next time we talk with this person."
+    }
+    conversation_history.append(system_prompt)
+
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=conversation_history,
         max_tokens=100,
         n=1,
         stop=None,
         temperature=0.5,
     )
 
-    summary = response.choices[0].text.strip()
+    summary = response.choices[0].message["content"]
     return summary
 
 
@@ -69,7 +80,8 @@ def create_table(conn):
     CREATE TABLE IF NOT EXISTS faces (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        context TEXT
+        context TEXT,
+        last_talked TIMESTAMP
     )
     """)
     conn.commit()
@@ -77,8 +89,15 @@ def create_table(conn):
 def insert_row(conn, id, name):
     cursor = conn.cursor()
     cursor.execute("""
-    INSERT INTO faces (id, name) VALUES (?, ?)
-    """, (id, name))
+    INSERT INTO faces (id, name, last_talked) VALUES (?, ?, ?)
+    """, (id, name, int(time.time())))
+    conn.commit()
+
+def update_last_talked(conn, id, context):
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE faces SET last_talked = ?, context = ? WHERE id = ?
+    """, (int(time.time()), context, id))
     conn.commit()
 
 def query_face_row(conn, id):
@@ -87,6 +106,7 @@ def query_face_row(conn, id):
     return cursor.fetchone()
 
 def print_row_details(row):
+    # print(str(row))
     print(f"ID: {row[0]}\nName: {row[1]}\nContext: {row[2]}\n")
 
 
@@ -107,10 +127,26 @@ def load_known_face_encodings():
     return uuids, face_encodings
 
 
-def have_a_conversation(face_row):
+def have_a_conversation(face_row, conn):
     print("Face details:")
     print_row_details(face_row)
     speak_text("Hello " + face_row[1] + ", it's nice to see you again.")
+    
+    conversation_history = []
+    user_input = ""
+
+    while True:
+        user_input = input("You: ")
+        if user_input.lower() == "exit":
+            break
+
+        ai_response = chat_with_gpt(user_input, conversation_history)
+        print("AI: " + ai_response)
+        speak_text(ai_response)
+
+    context = summarize_conversation(conversation_history)
+    update_last_talked(conn, face_row[0], context)
+
 
 def main():
     if not os.path.exists(KNOWN_FACES_DIR):
@@ -136,7 +172,7 @@ def main():
         if len(face_locations) == 1:
             if start_time is None:
                 start_time = time.time()
-            elif time.time() - start_time >= 5:
+            elif time.time() - start_time >= 3:
                 face_encodings = face_recognition.face_encodings(small_frame, face_locations)
 
                 if len(face_encodings) == 1:
@@ -147,7 +183,7 @@ def main():
                         matched_uuid = known_uuids[matches.index(True)]
                         print("Face already exists in the database.")
                         face_row = query_face_row(conn, matched_uuid)
-                        have_a_conversation(face_row)
+                        have_a_conversation(face_row, conn)
                     else:
                         speak_text("Please input your name.")
                         name = input()
