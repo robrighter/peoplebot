@@ -9,6 +9,7 @@ import uuid
 import pickle
 import time
 import openai
+import threading
 
 
 KNOWN_FACES_DIR = "known_faces"
@@ -17,11 +18,11 @@ NAME = "Radar"
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 
-def chat_with_gpt(user_input, conversation_history):
+def chat_with_gpt(conversation_history, user_input):
     if not conversation_history:
         conversation_history.append({
-            "role": "assistant",
-            "content": "You're name is  "+NAME+". It's time to make a new friend. You are speaking with a person you have never met. Your goal is to learn as much as possible about the person and be a good friend."
+            "role": "system",
+            "content": "You're name is  "+NAME+". It's time to talk to some friends. You are either speaking with a person you have never met or continuing a conversation with an existing friend. Your goal is to learn as much as possible about the person and be a good friend."
         })
 
     conversation_history.append({"role": "user", "content": user_input})
@@ -106,7 +107,7 @@ def query_face_row(conn, id):
     return cursor.fetchone()
 
 def print_row_details(row):
-    # print(str(row))
+    print(str(row))
     print(f"ID: {row[0]}\nName: {row[1]}\nContext: {row[2]}\n")
 
 
@@ -127,25 +128,37 @@ def load_known_face_encodings():
     return uuids, face_encodings
 
 
-def have_a_conversation(face_row, conn):
-    print("Face details:")
-    print_row_details(face_row)
-    speak_text("Hello " + face_row[1] + ", it's nice to see you again.")
+def have_a_conversation(conn, faces_in_frame):
     
-    conversation_history = []
-    user_input = ""
-
     while True:
-        user_input = input("You: ")
-        if user_input.lower() == "exit":
-            break
-
-        ai_response = chat_with_gpt(user_input, conversation_history)
-        print("AI: " + ai_response)
-        speak_text(ai_response)
-
-    context = summarize_conversation(conversation_history)
-    update_last_talked(conn, face_row[0], context)
+        print("We have " + str(len(faces_in_frame)) + " faces in context")
+        #for now we are only going to talk to the first person we see. If multiple people are in frame we ignore everyone but 1
+        face = ""
+        if len(faces_in_frame) > 0:
+            key = list(faces_in_frame.keys())[0]
+            face = faces_in_frame[key]
+            context = face[2]
+            print_row_details(face)
+            conversation_history = []
+            user_input = ""
+            if context is None:
+                user_input = "This is the start of a new friendship. We have never met before. Let's get to know each other and be friends."
+            else:
+                user_input = "This conversation is continuing from our previous discussion. Here is a summary of our previous discussion: " + context
+            ai_response = chat_with_gpt(conversation_history, user_input )
+            print("AI: " + ai_response)
+            speak_text(ai_response)
+            while True:
+                user_input = input("You: ")
+                if user_input.lower() == "exit":
+                    break
+                ai_response = chat_with_gpt(conversation_history, user_input)
+                print("AI: " + ai_response)
+                speak_text(ai_response)
+            context = summarize_conversation(conversation_history)
+            update_last_talked(conn, face, context)
+        time.sleep(3)
+        
 
 
 def main():
@@ -153,11 +166,15 @@ def main():
         os.makedirs(KNOWN_FACES_DIR)
     conn = create_database_connection()
     create_table(conn)
+    faces_in_frame = {}
 
     known_uuids, known_face_encodings = load_known_face_encodings()
 
     video_capture = cv2.VideoCapture(0)
     start_time = None
+
+    convesation_thread = threading.Thread(target=have_a_conversation, args=(conn,faces_in_frame, ))
+    convesation_thread.start()
 
     while True:
         ret, frame = video_capture.read()
@@ -183,21 +200,22 @@ def main():
                         matched_uuid = known_uuids[matches.index(True)]
                         print("Face already exists in the database.")
                         face_row = query_face_row(conn, matched_uuid)
-                        have_a_conversation(face_row, conn)
+                        faces_in_frame[matched_uuid] = face_row
                     else:
-                        speak_text("Please input your name.")
-                        name = input()
+                        speak_text("I see a new person.")
+                        name = "not implemented"
                         unique_id = str(uuid.uuid4())
                         save_face_encoding(unique_id, face_encodings[0])
                         insert_row(conn, unique_id, name)
-                        speak_text("Nice to meet you " + name)
-                        print(f"Face encoding saved as {unique_id}.pickle and added to the database.")
+                        face_row = query_face_row(conn, unique_id)
+                        faces_in_frame[unique_id] = face_row
                 start_time = None
 
         elif len(face_locations) > 1:
             speak_text("I can only talk to one person at a time. I see more than one person in front of me.")
             start_time = None
         else:
+            faces_in_frame.clear()
             start_time = None
 
         cv2.imshow("Video", frame)
