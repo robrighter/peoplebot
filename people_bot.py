@@ -10,6 +10,7 @@ import pickle
 import time
 import openai
 import threading
+import json
 
 
 KNOWN_FACES_DIR = "known_faces"
@@ -17,12 +18,26 @@ NAME = "Radar"
 # Set up API key and library
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+GPT_SYSTEM_ROLE_PROMPT = ("You're name is  "+NAME+". You are either speaking with a person you have never met or"
+                          " continuing a conversation with an existing friend. Your goal"
+                          " is to learn as much as possible about the person and be a good friend."
+                          " THIS IS VERY IMPORTANT: Each time you respond only reply with a JSON object that has 4"
+                          " properties: 'reply' which is your conversational reply in the conversation,"
+                          " 'name' which is the name of the person you are talking to if you know it (otherwise null),"
+                          " 'should_end' which is a boolean value that is true if the conversation"
+                          " has come to a reasonable stopping point, and 'summary' which is a full summary"
+                          " of what you know about the person. This summary will be used to remember details about this"
+                          " person the next time you speak with them.")
+
 
 def chat_with_gpt(conversation_history, user_input):
+    print('The conversation history is:')
+    print(conversation_history)
+
     if not conversation_history:
         conversation_history.append({
             "role": "system",
-            "content": "You're name is  "+NAME+". It's time to talk to some friends. You are either speaking with a person you have never met or continuing a conversation with an existing friend. Your goal is to learn as much as possible about the person and be a good friend."
+            "content": GPT_SYSTEM_ROLE_PROMPT 
         })
 
     conversation_history.append({"role": "user", "content": user_input})
@@ -36,29 +51,13 @@ def chat_with_gpt(conversation_history, user_input):
         temperature=0.5,
     )
 
+
     message = response.choices[0].message["content"]
-    conversation_history.append({"role": "assistant", "content": message})
-    return message
-
-
-def summarize_conversation(conversation_history):
-    system_prompt = {
-        "role": "system",
-        "content": "Your task is to summarize the conversation, capturing important parts to be reused as context the next time we talk with this person."
-    }
-    conversation_history.append(system_prompt)
-
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=conversation_history,
-        max_tokens=100,
-        n=1,
-        stop=None,
-        temperature=0.5,
-    )
-
-    summary = response.choices[0].message["content"]
-    return summary
+    print("GOT BACK THIS MESSAGE:")
+    print(message)
+    parsedDict = json.loads(message)
+    conversation_history.append({"role": "assistant", "content": message })
+    return parsedDict
 
 
 def speak_text(text):
@@ -72,7 +71,7 @@ def speak_text(text):
 
 
 def create_database_connection():
-    conn = sqlite3.connect('faces.db')
+    conn = sqlite3.connect('faces.db', check_same_thread=False)
     return conn
 
 def create_table(conn):
@@ -94,11 +93,20 @@ def insert_row(conn, id, name):
     """, (id, name, int(time.time())))
     conn.commit()
 
+def update_name(conn, id, name):
+    print("updating name")
+    cursor = conn.cursor()
+    cursor.execute("""
+    UPDATE faces SET name = ? WHERE id = ?
+    """, (str(name), str(id)))
+    conn.commit()
+
 def update_last_talked(conn, id, context):
+    print("updating last talked")
     cursor = conn.cursor()
     cursor.execute("""
     UPDATE faces SET last_talked = ?, context = ? WHERE id = ?
-    """, (int(time.time()), context, id))
+    """, (int(time.time()), str(context), str(id)))
     conn.commit()
 
 def query_face_row(conn, id):
@@ -129,7 +137,6 @@ def load_known_face_encodings():
 
 
 def have_a_conversation(conn, faces_in_frame):
-    
     while True:
         print("We have " + str(len(faces_in_frame)) + " faces in context")
         #for now we are only going to talk to the first person we see. If multiple people are in frame we ignore everyone but 1
@@ -138,26 +145,31 @@ def have_a_conversation(conn, faces_in_frame):
             key = list(faces_in_frame.keys())[0]
             face = faces_in_frame[key]
             context = face[2]
+            face_id = face[0]
             print_row_details(face)
             conversation_history = []
             user_input = ""
             if context is None:
                 user_input = "This is the start of a new friendship. We have never met before. Let's get to know each other and be friends."
             else:
-                user_input = "This conversation is continuing from our previous discussion. Here is a summary of our previous discussion: " + context
+                user_input = "Let's continue our previous discussion. Remember only to repspond with that JSON object format. Here is a quick summary of what we talked about last time  " + context
             ai_response = chat_with_gpt(conversation_history, user_input )
-            print("AI: " + ai_response)
-            speak_text(ai_response)
+            print("AI: " + ai_response['reply'])
+            speak_text(ai_response['reply'])
             while True:
                 user_input = input("You: ")
-                if user_input.lower() == "exit":
-                    break
                 ai_response = chat_with_gpt(conversation_history, user_input)
-                print("AI: " + ai_response)
-                speak_text(ai_response)
-            context = summarize_conversation(conversation_history)
-            update_last_talked(conn, face, context)
-        time.sleep(3)
+                print("AI: " + ai_response['reply'])
+                speak_text(ai_response['reply'])
+                if bool(str(ai_response['name'])):
+                    update_name(conn, face_id, ai_response['name'])
+                update_last_talked(conn, face_id, ai_response['summary'])
+                if ai_response['should_end']:
+                    print('AI thinks that the conversation is over.')
+                    break
+
+            
+        time.sleep(10)
         
 
 
@@ -173,7 +185,7 @@ def main():
     video_capture = cv2.VideoCapture(0)
     start_time = None
 
-    convesation_thread = threading.Thread(target=have_a_conversation, args=(conn,faces_in_frame, ))
+    convesation_thread = threading.Thread(target=have_a_conversation, args=(conn, faces_in_frame, ))
     convesation_thread.start()
 
     while True:
@@ -186,7 +198,7 @@ def main():
 
         face_locations = face_recognition.face_locations(small_frame)   
 
-        if len(face_locations) == 1:
+        if len(face_locations) > 0:
             if start_time is None:
                 start_time = time.time()
             elif time.time() - start_time >= 3:
@@ -202,31 +214,28 @@ def main():
                         face_row = query_face_row(conn, matched_uuid)
                         faces_in_frame[matched_uuid] = face_row
                     else:
-                        speak_text("I see a new person.")
-                        name = "not implemented"
+                        name = "unknown"
                         unique_id = str(uuid.uuid4())
+                        known_face_encodings.append(face_encodings[0])
+                        known_uuids.append(unique_id)
                         save_face_encoding(unique_id, face_encodings[0])
                         insert_row(conn, unique_id, name)
                         face_row = query_face_row(conn, unique_id)
                         faces_in_frame[unique_id] = face_row
                 start_time = None
 
-        elif len(face_locations) > 1:
-            speak_text("I can only talk to one person at a time. I see more than one person in front of me.")
-            start_time = None
         else:
             faces_in_frame.clear()
             start_time = None
 
-        cv2.imshow("Video", frame)
-
+        #cv2.imshow("Video", frame)
+        time.sleep(3)
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
     video_capture.release()
     cv2.destroyAllWindows()
     conn.close()
-
 
 
 

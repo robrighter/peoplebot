@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# File to delete
+file_to_delete="faces.db"
+
+# Directory containing files to delete
+dir_to_clear="known_faces"
+
+# Check if file exists, then delete it
+if [ -e "$file_to_delete" ]; then
+    rm "$file_to_delete"
+    echo "Deleted file: $file_to_delete"
+else
+    echo "File not found: $file_to_delete"
+fi
+
+# Check if directory exists, then delete all files inside
+if [ -d "$dir_to_clear" ]; then
+    rm -r "${dir_to_clear:?}"/*
+    echo "Deleted all files in directory: $dir_to_clear"
+else
+    echo "Directory not found: $dir_to_clear"
+fi
