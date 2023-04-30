@@ -15,17 +15,29 @@ PeopleBot is an open-source project built in Python, utilizing the power of larg
 To install PeopleBot, please follow these steps:
 
 1. Clone this repository to your local machine:
-git clone https://github.com/yourusername/peoplebot.git
-
+  ```
+  git clone https://github.com/yourusername/peoplebot.git
+  ```
+  
 2. Change to the cloned directory:
-cd peoplebot
-
+  ```
+  cd peoplebot
+  ```
+  
 3. Set up a virtual environment (optional, but recommended):
-python3 -m venv venv
-source venv/bin/activate
+
+  ```
+  python3 -m venv venv
+  source venv/bin/activate
+  ```
+
 
 4. Install the required packages:
-pip install -r requirements.txt
+
+  ```
+  pip install -r requirements.txt
+  ```
+
 
 5. Set up an OpenAI API key:
 
@@ -38,7 +50,10 @@ pip install -r requirements.txt
 ## Usage
 
 To run PeopleBot, execute the following command:
+```
 python people_bot.py
+```
+
 
 The chatbot will start processing video from your webcam, detecting faces, and initiating conversations. When it recognizes a face, it will either start a new conversation or continue a previous one, depending on whether it has encountered the person before.
 
