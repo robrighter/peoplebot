@@ -11,6 +11,8 @@ import time
 import openai
 import threading
 import json
+import speech_recognition as sr
+
 
 
 KNOWN_FACES_DIR = "known_faces"
@@ -135,6 +137,23 @@ def load_known_face_encodings():
 
     return uuids, face_encodings
 
+def listen_to_speech():
+    # Create a recognizer object
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        print("Listening...")
+        # Use the recognizer to listen to the audio from the microphone
+        audio = r.listen(source)
+    # Try to recognize the speech using Google's speech recognition service
+    try:
+        print("Processing...")
+        text = r.recognize_google(audio)
+        return text
+    except sr.UnknownValueError:
+        return "Google Speech Recognition could not understand audio"
+    except sr.RequestError as e:
+        return "Could not request results from Google Speech Recognition service; {0}".format(e)
+
 
 def have_a_conversation(conn, faces_in_frame):
     while True:
@@ -157,7 +176,7 @@ def have_a_conversation(conn, faces_in_frame):
             print("AI: " + ai_response['reply'])
             speak_text(ai_response['reply'])
             while True:
-                user_input = input("You: ")
+                user_input = listen_to_speech()
                 ai_response = chat_with_gpt(conversation_history, user_input)
                 print("AI: " + ai_response['reply'])
                 speak_text(ai_response['reply'])
