@@ -18,6 +18,21 @@ class ChatGPTWrap:
                           " person the next time you speak with them.")
         openai.api_key = os.getenv("OPENAI_API_KEY")
 
+    def parse_json(self, message):
+        try:
+            parsed_dict = json.loads(message)
+            parsed_dict["error"] = False
+        except json.JSONDecodeError:
+            # Attempt to fix the JSON by appending string termination and object termination
+            fixed_message = message.rstrip() + '"}'
+            
+            try:
+                parsed_dict = json.loads(fixed_message)
+                parsed_dict["error"] = False
+            except json.JSONDecodeError:
+                parsed_dict = {"error": True}
+        return parsed_dict
+
         
     def chat_with_gpt(self, conversation_history, user_input):
         if not conversation_history:
@@ -39,7 +54,7 @@ class ChatGPTWrap:
         message = response.choices[0].message["content"]
         print("GOT BACK THIS MESSAGE:")
         print(message)
-        parsedDict = json.loads(message)
+        parsedDict = self.parse_json(message)
         conversation_history.append({"role": "assistant", "content": message })
         return parsedDict
 
