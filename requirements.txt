@@ -6,3 +6,4 @@ gtts==2.2.3
 playsound==1.3.0
 openai==0.27.0
 SpeechRecognition==3.8.1
+eel==0.14.0

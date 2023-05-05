@@ -8,6 +8,7 @@ import json
 from db import FaceDatabase
 from speechio import SpeechIO
 from chatgpt import ChatGPTWrap
+from ui import RobotFaceUI
 
 
 KNOWN_FACES_DIR = "known_faces"
@@ -15,6 +16,7 @@ DATABASE_FILE = "faces.db"
 NAME = "Radar"
 speech = SpeechIO()
 chat = ChatGPTWrap(NAME)
+
 
 
 def have_a_conversation(db, faces_in_frame):
@@ -54,6 +56,7 @@ def have_a_conversation(db, faces_in_frame):
 
 
 def main():
+    #ui = RobotFaceUI()
     db = FaceDatabase(db_path=DATABASE_FILE, known_faces_dir=KNOWN_FACES_DIR)
     db.create_table()
     faces_in_frame = {}
